@@ -156,8 +156,8 @@ elif st.session_state.step == 3:
     ].sort_values("position")
 
     block_labels = {
-        row.block_id: f"{int(row.position)}. {row['name']}"
-        for row in subset.itertuples()
+        row["block_id"]: f"{int(row['position'])}. {row['name']}"
+        for _, row in subset.iterrows()
     }
     block_id = st.selectbox(
         "Block",
