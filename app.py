@@ -12,8 +12,10 @@ import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
 
+import wireframes
+
 # ---------------------------------------------------------------------------
-# Page config + brand styling
+# Page config
 # ---------------------------------------------------------------------------
 st.set_page_config(
     page_title="Al Rugaib — Merchandising Block Update",
@@ -22,29 +24,59 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ---------------------------------------------------------------------------
+# Brand colors — used consistently in CSS below.
+# Note: .streamlit/config.toml fixes the base theme to light, so these
+# colors render the same regardless of the viewer's OS/browser dark mode.
+# ---------------------------------------------------------------------------
 GOLD = "#D4AF37"
 CHARCOAL = "#121212"
 PARCHMENT = "#FDFBF7"
 LIGHT_GREY = "#F2EFE9"
 MID_GREY = "#D9D4C9"
 GREEN = "#2E7D32"
+TEXT_SECONDARY = "#5A574E"
 
 st.markdown(
     f"""
     <style>
     .stApp {{ background-color: {PARCHMENT}; }}
-    h1, h2, h3 {{ font-family: 'Playfair Display', Georgia, serif; color: {CHARCOAL}; }}
-    p, label, .stMarkdown {{ font-family: 'Manrope', sans-serif; }}
+
+    h1, h2, h3 {{ font-family: 'Playfair Display', Georgia, serif; color: {CHARCOAL} !important; }}
+
+    /* Force readable text everywhere, regardless of viewer's system theme */
+    p, span, label, .stMarkdown, .stCaption, div[data-testid="stMarkdownContainer"] {{
+        color: {CHARCOAL};
+    }}
+    [data-testid="stCaptionContainer"], .stCaption, small {{
+        color: {TEXT_SECONDARY} !important;
+    }}
+
+    /* Sidebar */
+    section[data-testid="stSidebar"] {{
+        background-color: {LIGHT_GREY};
+    }}
+    section[data-testid="stSidebar"] * {{
+        color: {CHARCOAL} !important;
+    }}
+
+    /* Inputs */
+    .stTextInput input, .stTextArea textarea, .stSelectbox div[data-baseweb="select"] {{
+        background-color: #FFFFFF !important;
+        color: {CHARCOAL} !important;
+        border: 1px solid {MID_GREY} !important;
+    }}
 
     .stButton>button {{
-        background-color: {GOLD}; color: white; border: none;
+        background-color: {GOLD}; color: #FFFFFF; border: none;
         border-radius: 4px; padding: 0.6em 1.4em; font-weight: 600;
         transition: all 0.15s ease;
     }}
     .stButton>button:hover {{ background-color: {CHARCOAL}; color: {GOLD}; }}
+    .stButton>button p {{ color: inherit !important; }}
 
     .secondary-btn button {{
-        background-color: transparent !important; color: {CHARCOAL} !important;
+        background-color: #FFFFFF !important; color: {CHARCOAL} !important;
         border: 1px solid {MID_GREY} !important;
     }}
     .secondary-btn button:hover {{
@@ -52,36 +84,37 @@ st.markdown(
     }}
 
     .block-card {{
-        background: white; border: 1px solid {MID_GREY}; border-left: 4px solid {GOLD};
-        border-radius: 4px; padding: 1.1em 1.3em; margin: 0.8em 0 1.2em 0;
+        background: #FFFFFF; border: 1px solid {MID_GREY}; border-left: 4px solid {GOLD};
+        border-radius: 4px; padding: 1.1em 1.3em; margin: 0.8em 0 1.2em 0; color: {CHARCOAL};
     }}
     .info-card {{
         background: {LIGHT_GREY}; border-radius: 4px; padding: 1em 1.2em;
-        margin-bottom: 1em; font-size: 0.92em;
+        margin-bottom: 1em; font-size: 0.92em; color: {CHARCOAL};
     }}
-    .breadcrumb {{
-        font-size: 0.85em; color: #6B6B6B; margin-bottom: 0.3em;
-    }}
+    .breadcrumb {{ font-size: 0.85em; color: {TEXT_SECONDARY}; margin-bottom: 0.3em; }}
     .breadcrumb b {{ color: {CHARCOAL}; }}
+
+    .wireframe-label {{
+        font-size: 0.78em; color: {TEXT_SECONDARY}; text-transform: uppercase;
+        letter-spacing: 0.04em; margin-bottom: 6px; font-weight: 600;
+    }}
 
     /* Progress stepper */
     .stepper {{ display: flex; align-items: center; margin: 1em 0 1.6em 0; }}
     .step-circle {{
         width: 30px; height: 30px; border-radius: 50%;
         display: flex; align-items: center; justify-content: center;
-        font-weight: 700; font-size: 0.85em; color: white;
+        font-weight: 700; font-size: 0.85em; color: #FFFFFF;
         background-color: {MID_GREY}; flex-shrink: 0;
     }}
     .step-circle.active {{ background-color: {GOLD}; }}
     .step-circle.done {{ background-color: {GREEN}; }}
     .step-label {{
-        font-size: 0.78em; margin-left: 0.4em; margin-right: 0.9em; color: #6B6B6B;
+        font-size: 0.78em; margin-left: 0.4em; margin-right: 0.9em; color: {TEXT_SECONDARY};
         white-space: nowrap;
     }}
     .step-label.active {{ color: {CHARCOAL}; font-weight: 700; }}
-    .step-line {{
-        flex-grow: 1; height: 2px; background-color: {MID_GREY}; margin-right: 0.9em;
-    }}
+    .step-line {{ flex-grow: 1; height: 2px; background-color: {MID_GREY}; margin-right: 0.9em; }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -129,7 +162,10 @@ def submit_row(row: dict):
 # ---------------------------------------------------------------------------
 # Session state
 # ---------------------------------------------------------------------------
-defaults = {"step": 0, "platform": None, "page": None, "block_id": None, "last_submit": None}
+defaults = {
+    "step": 0, "merch_name": "", "platform": None, "page": None,
+    "block_id": None, "last_submit": None,
+}
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
@@ -137,22 +173,28 @@ for k, v in defaults.items():
 def go_to(step):
     st.session_state.step = step
 
-def reset_wizard():
+def reset_wizard(keep_name=True):
+    name = st.session_state.merch_name if keep_name else ""
     for k, v in defaults.items():
         st.session_state[k] = v
+    st.session_state.merch_name = name
 
 # ---------------------------------------------------------------------------
 # Sidebar — always-visible instructions, present on every page
 # ---------------------------------------------------------------------------
 with st.sidebar:
+    if st.session_state.merch_name:
+        st.markdown(f"**Updating as:** {st.session_state.merch_name}")
+        st.divider()
+
     st.markdown("### 📋 How this works")
     st.markdown(
         """
 1. **Pick the platform** — Website or App
 2. **Pick the page** — Home, Collection, etc.
-3. **Pick the block** — the exact section on that page
+3. **Pick the block** — see its wireframe, then pick it
 4. **Fill in the product + image** the block should show
-5. **Submit** — it's saved straight to the shared tracker
+5. **Submit** — saved straight to the shared tracker
 
 No spreadsheet, no formatting to worry about — just pick and fill.
         """
@@ -170,10 +212,14 @@ No spreadsheet, no formatting to worry about — just pick and fill.
     st.divider()
     st.caption("Questions? Ping the CRO team on the shared channel.")
     if st.session_state.step > 0:
-        st.button("⟲ Start a new update", on_click=reset_wizard, use_container_width=True)
+        st.button(
+            "⟲ Start a new update",
+            on_click=lambda: reset_wizard(keep_name=True),
+            use_container_width=True,
+        )
 
 # ---------------------------------------------------------------------------
-# Progress stepper (shown on steps 1-3, not on welcome/done screens)
+# Progress stepper
 # ---------------------------------------------------------------------------
 STEP_NAMES = ["Platform", "Page", "Block & Details"]
 
@@ -195,7 +241,7 @@ def render_stepper(current):
     st.markdown(html, unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
-# STEP 0 — Welcome / Intro
+# STEP 0 — Welcome / Intro + name capture
 # ---------------------------------------------------------------------------
 if st.session_state.step == 0:
     st.title("🪑 Digital Merchandising — Block Update Tool")
@@ -215,8 +261,8 @@ if st.session_state.step == 0:
         st.markdown("**1. Choose where**")
         st.caption("Pick Website or App, then the page — like Home or a Collection page.")
     with c2:
-        st.markdown("**2. Choose the block**")
-        st.caption("Pick the exact section, like 'Hero Banner' or 'Best Sellers Carousel'.")
+        st.markdown("**2. See the block**")
+        st.caption("A small mockup shows you exactly what that block looks like.")
     with c3:
         st.markdown("**3. Fill it in**")
         st.caption("Add the product SKU and image link, mark the status, submit.")
@@ -225,18 +271,32 @@ if st.session_state.step == 0:
     st.markdown(
         """
         <div class="info-card">
-        💡 <b>Tip:</b> Each block shows you the selection rule to follow (e.g. "Best Sellers" or
-        "New Arrivals") and the max number of products allowed — so you don't need to
-        remember the merchandising playbook, it's right there when you need it.
+        💡 <b>Tip:</b> Each block shows you a mini layout preview, the selection rule to
+        follow (e.g. "Best Sellers" or "New Arrivals"), and the max number of products
+        allowed — so you don't need to remember the merchandising playbook, it's right
+        there when you need it.
         </div>
         """,
         unsafe_allow_html=True,
     )
 
     st.write("")
-    if st.button("Start an update →", use_container_width=True, type="primary"):
+    st.markdown("#### Before you start")
+    name = st.text_input(
+        "Your name",
+        value=st.session_state.merch_name,
+        placeholder="e.g. Rahaf Alqahtani",
+        help="So updates in the tracker are saved under your name.",
+    )
+
+    st.write("")
+    start_disabled = not name.strip()
+    if st.button("Start an update →", use_container_width=True, type="primary", disabled=start_disabled):
+        st.session_state.merch_name = name.strip()
         go_to(1)
         st.rerun()
+    if start_disabled:
+        st.caption("Enter your name above to continue.")
 
 # ---------------------------------------------------------------------------
 # STEP 1 — Platform
@@ -294,7 +354,7 @@ elif st.session_state.step == 2:
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
-# STEP 3 — Block + form
+# STEP 3 — Block + wireframe + form
 # ---------------------------------------------------------------------------
 elif st.session_state.step == 3:
     render_stepper(3)
@@ -321,6 +381,10 @@ elif st.session_state.step == 3:
         help="Blocks are listed in the order they appear on the page, top to bottom.",
     )
     block_row = subset[subset["block_id"] == block_id].iloc[0]
+
+    # --- Wireframe preview ---
+    st.markdown('<div class="wireframe-label">What this block looks like</div>', unsafe_allow_html=True)
+    st.markdown(wireframes.get_wireframe_html(block_row["block_type"]), unsafe_allow_html=True)
 
     max_skus = block_row["max_skus"]
     max_skus_line = ""
@@ -355,12 +419,9 @@ elif st.session_state.step == 3:
             help="See the sidebar for what each status means",
         )
         owner = st.selectbox(
-            "Your name",
-            [
-                "Rahaf Alqahtani", "Norah Albuolayan", "Abeer Aldkheel",
-                "Dina Bokhamseen", "Aisha Khubrany", "Shahad Almuqayrin",
-                "Shahad Alojaimi", "Zaha Albaadi", "Other (add in notes)",
-            ],
+            "Who's making this update",
+            ["Content Team", "Virtual Merchandising Team", "Other (note below)"],
+            help=f"Submitting as {st.session_state.merch_name}",
         )
         notes = st.text_area("Notes (optional)", placeholder="Any context for the CRO team")
 
@@ -380,7 +441,7 @@ elif st.session_state.step == 3:
                     "status": status,
                     "owner": owner,
                     "notes": notes,
-                    "submitted_by": owner,
+                    "submitted_by": st.session_state.merch_name,
                     "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
                 }
                 try:
@@ -399,7 +460,7 @@ elif st.session_state.step == 3:
         st.markdown("</div>", unsafe_allow_html=True)
     with col2:
         st.markdown('<div class="secondary-btn">', unsafe_allow_html=True)
-        st.button("Start over", on_click=reset_wizard)
+        st.button("Start over", on_click=lambda: reset_wizard(keep_name=True))
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
@@ -409,11 +470,11 @@ elif st.session_state.step == 4:
     st.title("✅ Saved")
     st.success(f"**{st.session_state.last_submit}** was updated in the shared tracker.")
     st.markdown(
-        """
+        f"""
         <div class="info-card">
-        Your update is now visible to the CRO team in the shared Google Sheet.
-        No further action needed — they'll review and it'll go live on the next
-        publish cycle.
+        Logged under <b>{st.session_state.merch_name}</b>. Your update is now visible to
+        the CRO team in the shared Google Sheet. No further action needed — they'll
+        review and it'll go live on the next publish cycle.
         </div>
         """,
         unsafe_allow_html=True,
@@ -430,6 +491,6 @@ elif st.session_state.step == 4:
     with c2:
         st.markdown('<div class="secondary-btn">', unsafe_allow_html=True)
         if st.button("Done for now", use_container_width=True):
-            reset_wizard()
+            reset_wizard(keep_name=False)
             st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
