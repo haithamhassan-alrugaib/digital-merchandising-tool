@@ -135,6 +135,30 @@ st.markdown(
     }}
     .step-label.active {{ color: {CHARCOAL}; font-weight: 700; }}
     .step-line {{ flex-grow: 1; height: 2px; background-color: {MID_GREY}; margin-right: 0.9em; }}
+
+    /* Responsive: stack side-by-side columns on narrow screens so buttons
+       and fields never get squeezed/misaligned on mobile. */
+    @media (max-width: 640px) {{
+        div[data-testid="stHorizontalBlock"] {{
+            flex-direction: column !important;
+        }}
+        div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {{
+            width: 100% !important;
+            flex: 1 1 100% !important;
+            margin-bottom: 0.5rem;
+        }}
+        .stepper {{ flex-wrap: wrap; row-gap: 0.5rem; }}
+    }}
+
+    /* Keep all buttons in a row the same height regardless of label length */
+    .stButton>button {{ min-height: 42px; width: 100%; }}
+
+    .warning-card {{
+        background: #FBF1E6; border-left: 4px solid {TERRACOTTA};
+        border-radius: 6px; padding: 0.9em 1.1em; margin: 0.6em 0 1em 0;
+        font-size: 0.92em; color: {CHARCOAL};
+    }}
+    .required-star {{ color: {TERRACOTTA}; }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -497,50 +521,58 @@ elif st.session_state.step == 3:
     )
 
     st.markdown("##### Now fill in the details")
+    st.caption("Fields marked with a star are required.")
 
-    # Update type lives OUTSIDE the form so picking "Schedule" can reveal the
-    # End Date field immediately, without waiting for a form submit.
+    # Update type lives OUTSIDE the form so picking it can reveal the End Date
+    # field immediately. No default selection — forces an active choice rather
+    # than silently defaulting to Immediate.
     update_type = st.radio(
-        "Update type",
+        "Update type ⭐",
         ["⚡ Immediate", "📅 Schedule"],
+        index=None,
         horizontal=True,
-        help="Immediate = goes live once reviewed. Schedule = goes live on a set date.",
+        help="Immediate = goes live once reviewed. Schedule = goes live on a set date range.",
+        key=f"update_type_{block_id}",
     )
+
+    if update_type is None:
+        st.markdown(
+            '<div class="warning-card">⚠️ Pick <b>Immediate</b> or <b>Schedule</b> above '
+            'before filling in dates below — the form won\'t submit without it.</div>',
+            unsafe_allow_html=True,
+        )
+
     is_scheduled = update_type == "📅 Schedule"
 
     with st.form("update_form", clear_on_submit=False):
         sku_handle = st.text_input(
-            "Product SKU / Shopify Handle(s)",
+            "Product SKU / Shopify Handle(s) ⭐",
             placeholder="e.g. confa-grey-sofa-set  (separate multiple with commas)",
             help="The Shopify product handle — found in the product URL, after /products/",
         )
         image_url = st.text_input(
-            "Image URL",
+            "Image URL ⭐",
             placeholder="https://cdn.shopify.com/...",
             help="Paste a direct link to the image — right-click the image and 'Copy image address'",
         )
 
+        st.markdown("**When should this go live? ⭐**")
         date_col1, date_col2 = st.columns(2)
         with date_col1:
-            start_date_str = st.text_input(
+            start_date = st.date_input(
                 "Start date",
-                placeholder="DD/MM",
-                help="The day this should go live, as DD/MM (e.g. 14/07)",
+                value=None,
+                format="DD/MM/YYYY",
+                help="The day this should go live",
             )
         with date_col2:
-            if is_scheduled:
-                end_date_str = st.text_input(
-                    "End date",
-                    placeholder="DD/MM",
-                    help="The day this should come down, as DD/MM (e.g. 28/07)",
-                )
-            else:
-                end_date_str = ""
-                st.text_input(
-                    "End date",
-                    placeholder="Not needed for immediate updates",
-                    disabled=True,
-                )
+            end_date = st.date_input(
+                "End date",
+                value=None,
+                format="DD/MM/YYYY",
+                help="The day this should come down (Schedule only)",
+                disabled=not is_scheduled,
+            )
 
         supplier = st.text_input(
             "Which supplier is requesting this update",
@@ -551,12 +583,23 @@ elif st.session_state.step == 3:
         submitted = st.form_submit_button("✓ Submit update", use_container_width=True, type="primary")
 
         if submitted:
+            errors = []
+            if update_type is None:
+                errors.append("Pick Immediate or Schedule above before submitting.")
             if not sku_handle and not image_url:
-                st.error("Add at least a product SKU/handle or an image URL before submitting.")
-            elif not start_date_str.strip():
-                st.error("Add a start date before submitting.")
-            elif is_scheduled and not end_date_str.strip():
-                st.error("Schedule updates need an end date too.")
+                errors.append("Add at least a product SKU/handle or an image URL.")
+            if image_url and not image_url.strip().lower().startswith(("http://", "https://")):
+                errors.append("Image URL should start with http:// or https://")
+            if start_date is None:
+                errors.append("Add a start date.")
+            if is_scheduled and end_date is None:
+                errors.append("Schedule updates need an end date too.")
+            if is_scheduled and start_date and end_date and end_date < start_date:
+                errors.append("End date can't be before the start date.")
+
+            if errors:
+                for e in errors:
+                    st.error(e)
             else:
                 row = {
                     "block_id": block_id,
@@ -566,8 +609,8 @@ elif st.session_state.step == 3:
                     "sku_handle": sku_handle,
                     "image_url": image_url,
                     "update_type": update_type.split(" ", 1)[-1],  # "Immediate" or "Schedule"
-                    "start_date": start_date_str.strip(),
-                    "end_date": end_date_str.strip() if is_scheduled else "",
+                    "start_date": start_date.strftime("%d/%m/%Y") if start_date else "",
+                    "end_date": end_date.strftime("%d/%m/%Y") if (is_scheduled and end_date) else "",
                     "supplier": supplier,
                     "notes": notes,
                     "submitted_by": st.session_state.merch_name,
