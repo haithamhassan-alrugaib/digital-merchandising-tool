@@ -5,6 +5,7 @@ submissions straight into the team's shared Google Sheet.
 """
 
 import json
+import uuid
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -193,22 +194,31 @@ def get_worksheet():
     return sh.worksheet(SHEET_NAME_TAB)
 
 def submit_row(row: dict):
+    """Writes one row per image URL. All rows share the same submission_id
+    so the team can tell they belong to the same update. If there's more
+    than one image, only the first row carries the full notes/supplier text
+    to avoid clutter — every row carries the SKU list and dates either way."""
     ws = get_worksheet()
-    ws.append_row(
-        [
-            row["block_id"], row["platform"], row["page"], row["block_name"],
-            row["sku_handle"], row["image_url"], row["update_type"],
-            row["start_date"], row["end_date"], row["supplier"],
-            row["notes"], row["submitted_by"], row["timestamp"], "No", "",
-        ],
-        value_input_option="USER_ENTERED",
-    )
+    image_urls = row["image_urls"] or [""]
+    rows_to_write = []
+    for i, img in enumerate(image_urls):
+        rows_to_write.append(
+            [
+                row["submission_id"],
+                row["block_id"], row["platform"], row["page"], row["block_name"],
+                row["sku_handle"], img, row["update_type"],
+                row["start_date"], row["end_date"], row["supplier"],
+                row["notes"], row["submitted_by"], row["timestamp"], "No", "",
+            ]
+        )
+    ws.append_rows(rows_to_write, value_input_option="USER_ENTERED")
 
 def submit_support_row(submitted_by: str, issue_text: str):
     ws = get_worksheet()
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     ws.append_row(
         [
+            "",                       # submission_id — n/a
             "", "", "", "",          # block_id, platform, page, block_name — n/a
             "", "", "", "", "", "",  # sku, image, update_type, start, end, supplier — n/a
             "",                       # notes — n/a
@@ -224,7 +234,7 @@ def submit_support_row(submitted_by: str, issue_text: str):
 defaults = {
     "step": 0, "merch_name": "", "platform": None, "page": None,
     "block_id": None, "last_submit": None, "show_support": False,
-    "support_submitted": False,
+    "support_submitted": False, "image_count": 1,
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -544,16 +554,43 @@ elif st.session_state.step == 3:
 
     is_scheduled = update_type == "📅 Schedule"
 
+    # --- Dynamic image URL inputs — live OUTSIDE the form so "Add another
+    # image" can grow the list immediately without waiting for form submit.
+    st.markdown("**Image URL(s) ⭐**")
+    st.caption("Add one or more images. Each becomes its own row in the tracker, grouped under one submission.")
+
+    if "block_id" not in st.session_state or st.session_state.get("_last_block_for_images") != block_id:
+        st.session_state.image_count = 1
+        st.session_state["_last_block_for_images"] = block_id
+
+    image_values = []
+    for i in range(st.session_state.image_count):
+        col_img, col_remove = st.columns([6, 1])
+        with col_img:
+            val = st.text_input(
+                f"Image URL {i + 1}",
+                placeholder="https://cdn.shopify.com/...",
+                key=f"image_url_{block_id}_{i}",
+                label_visibility="collapsed" if i > 0 else "visible",
+            )
+            image_values.append(val)
+        with col_remove:
+            if st.session_state.image_count > 1:
+                if st.button("✕", key=f"remove_img_{block_id}_{i}", help="Remove this image"):
+                    st.session_state.image_count -= 1
+                    st.rerun()
+
+    if st.button("+ Add another image", key=f"add_img_{block_id}"):
+        st.session_state.image_count += 1
+        st.rerun()
+
+    st.write("")
+
     with st.form("update_form", clear_on_submit=False):
         sku_handle = st.text_input(
             "Product SKU / Shopify Handle(s) ⭐",
-            placeholder="e.g. confa-grey-sofa-set  (separate multiple with commas)",
-            help="The Shopify product handle — found in the product URL, after /products/",
-        )
-        image_url = st.text_input(
-            "Image URL ⭐",
-            placeholder="https://cdn.shopify.com/...",
-            help="Paste a direct link to the image — right-click the image and 'Copy image address'",
+            placeholder="e.g. confa-grey-sofa-set, agate-living-room-set  (separate multiple with commas)",
+            help="The Shopify product handle — found in the product URL, after /products/. Add several separated by commas.",
         )
 
         st.markdown("**When should this go live? ⭐**")
@@ -583,13 +620,21 @@ elif st.session_state.step == 3:
         submitted = st.form_submit_button("✓ Submit update", use_container_width=True, type="primary")
 
         if submitted:
+            # Parse comma-separated SKUs into a clean list, then back to a
+            # display string (trims stray whitespace around commas).
+            sku_list = [s.strip() for s in sku_handle.split(",") if s.strip()]
+            sku_display = ", ".join(sku_list)
+
+            image_list = [u.strip() for u in image_values if u.strip()]
+
             errors = []
             if update_type is None:
                 errors.append("Pick Immediate or Schedule above before submitting.")
-            if not sku_handle and not image_url:
+            if not sku_list and not image_list:
                 errors.append("Add at least a product SKU/handle or an image URL.")
-            if image_url and not image_url.strip().lower().startswith(("http://", "https://")):
-                errors.append("Image URL should start with http:// or https://")
+            bad_urls = [u for u in image_list if not u.lower().startswith(("http://", "https://"))]
+            if bad_urls:
+                errors.append("Every image URL should start with http:// or https://")
             if start_date is None:
                 errors.append("Add a start date.")
             if is_scheduled and end_date is None:
@@ -602,12 +647,13 @@ elif st.session_state.step == 3:
                     st.error(e)
             else:
                 row = {
+                    "submission_id": uuid.uuid4().hex[:8].upper(),
                     "block_id": block_id,
                     "platform": st.session_state.platform,
                     "page": st.session_state.page,
                     "block_name": block_row["name"],
-                    "sku_handle": sku_handle,
-                    "image_url": image_url,
+                    "sku_handle": sku_display,
+                    "image_urls": image_list,
                     "update_type": update_type.split(" ", 1)[-1],  # "Immediate" or "Schedule"
                     "start_date": start_date.strftime("%d/%m/%Y") if start_date else "",
                     "end_date": end_date.strftime("%d/%m/%Y") if (is_scheduled and end_date) else "",
@@ -619,6 +665,7 @@ elif st.session_state.step == 3:
                 try:
                     submit_row(row)
                     st.session_state.last_submit = block_row["name"]
+                    st.session_state.image_count = 1
                     go_to(4)
                     st.rerun()
                 except Exception as e:
