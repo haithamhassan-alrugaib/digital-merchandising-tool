@@ -1,7 +1,7 @@
 """
 Al Rugaib Furniture — Digital Merchandising Input Tool
-Guided 3-step form (Platform -> Page -> Block) that writes submissions
-straight into the team's shared Google Sheet.
+Guided flow (Welcome -> Platform -> Page -> Block -> Submit) that writes
+submissions straight into the team's shared Google Sheet.
 """
 
 import json
@@ -19,25 +19,68 @@ st.set_page_config(
     page_title="Al Rugaib — Merchandising Block Update",
     page_icon="🪑",
     layout="centered",
+    initial_sidebar_state="expanded",
 )
 
 GOLD = "#D4AF37"
 CHARCOAL = "#121212"
 PARCHMENT = "#FDFBF7"
+LIGHT_GREY = "#F2EFE9"
+MID_GREY = "#D9D4C9"
+GREEN = "#2E7D32"
 
 st.markdown(
     f"""
     <style>
     .stApp {{ background-color: {PARCHMENT}; }}
-    h1, h2, h3 {{ font-family: 'Playfair Display', serif; color: {CHARCOAL}; }}
+    h1, h2, h3 {{ font-family: 'Playfair Display', Georgia, serif; color: {CHARCOAL}; }}
+    p, label, .stMarkdown {{ font-family: 'Manrope', sans-serif; }}
+
     .stButton>button {{
         background-color: {GOLD}; color: white; border: none;
-        border-radius: 0px; padding: 0.6em 1.4em; font-weight: 600;
+        border-radius: 4px; padding: 0.6em 1.4em; font-weight: 600;
+        transition: all 0.15s ease;
     }}
     .stButton>button:hover {{ background-color: {CHARCOAL}; color: {GOLD}; }}
+
+    .secondary-btn button {{
+        background-color: transparent !important; color: {CHARCOAL} !important;
+        border: 1px solid {MID_GREY} !important;
+    }}
+    .secondary-btn button:hover {{
+        background-color: {LIGHT_GREY} !important; color: {CHARCOAL} !important;
+    }}
+
     .block-card {{
-        background: white; border: 1px solid #D9D4C9; border-radius: 0px;
-        padding: 1.2em; margin-bottom: 1em;
+        background: white; border: 1px solid {MID_GREY}; border-left: 4px solid {GOLD};
+        border-radius: 4px; padding: 1.1em 1.3em; margin: 0.8em 0 1.2em 0;
+    }}
+    .info-card {{
+        background: {LIGHT_GREY}; border-radius: 4px; padding: 1em 1.2em;
+        margin-bottom: 1em; font-size: 0.92em;
+    }}
+    .breadcrumb {{
+        font-size: 0.85em; color: #6B6B6B; margin-bottom: 0.3em;
+    }}
+    .breadcrumb b {{ color: {CHARCOAL}; }}
+
+    /* Progress stepper */
+    .stepper {{ display: flex; align-items: center; margin: 1em 0 1.6em 0; }}
+    .step-circle {{
+        width: 30px; height: 30px; border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        font-weight: 700; font-size: 0.85em; color: white;
+        background-color: {MID_GREY}; flex-shrink: 0;
+    }}
+    .step-circle.active {{ background-color: {GOLD}; }}
+    .step-circle.done {{ background-color: {GREEN}; }}
+    .step-label {{
+        font-size: 0.78em; margin-left: 0.4em; margin-right: 0.9em; color: #6B6B6B;
+        white-space: nowrap;
+    }}
+    .step-label.active {{ color: {CHARCOAL}; font-weight: 700; }}
+    .step-line {{
+        flex-grow: 1; height: 2px; background-color: {MID_GREY}; margin-right: 0.9em;
     }}
     </style>
     """,
@@ -84,71 +127,183 @@ def submit_row(row: dict):
     )
 
 # ---------------------------------------------------------------------------
-# Header
+# Session state
 # ---------------------------------------------------------------------------
-st.title("Digital Merchandising — Block Update")
-st.caption(
-    "Update what's showing in a website or app block. Pick the page, pick the "
-    "block, fill in the product and image, submit. It lands straight in the "
-    "shared tracker — no spreadsheet needed."
-)
-st.divider()
+defaults = {"step": 0, "platform": None, "page": None, "block_id": None, "last_submit": None}
+for k, v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
-# ---------------------------------------------------------------------------
-# Session state for the wizard
-# ---------------------------------------------------------------------------
-if "step" not in st.session_state:
-    st.session_state.step = 1
-if "platform" not in st.session_state:
-    st.session_state.platform = None
-if "page" not in st.session_state:
-    st.session_state.page = None
-if "block_id" not in st.session_state:
-    st.session_state.block_id = None
+def go_to(step):
+    st.session_state.step = step
 
 def reset_wizard():
-    for k in ("step", "platform", "page", "block_id"):
-        st.session_state[k] = None
-    st.session_state.step = 1
+    for k, v in defaults.items():
+        st.session_state[k] = v
+
+# ---------------------------------------------------------------------------
+# Sidebar — always-visible instructions, present on every page
+# ---------------------------------------------------------------------------
+with st.sidebar:
+    st.markdown("### 📋 How this works")
+    st.markdown(
+        """
+1. **Pick the platform** — Website or App
+2. **Pick the page** — Home, Collection, etc.
+3. **Pick the block** — the exact section on that page
+4. **Fill in the product + image** the block should show
+5. **Submit** — it's saved straight to the shared tracker
+
+No spreadsheet, no formatting to worry about — just pick and fill.
+        """
+    )
+    st.divider()
+    st.markdown("### 🎨 Status meanings")
+    st.markdown(
+        """
+🟢 **Live & Current** — published, looks right
+🟡 **Needs Refresh** — live but getting stale
+🔴 **Outdated / Broken** — wrong product or broken link, fix ASAP
+⚪ **Planned** — approved, not live yet
+        """
+    )
+    st.divider()
+    st.caption("Questions? Ping the CRO team on the shared channel.")
+    if st.session_state.step > 0:
+        st.button("⟲ Start a new update", on_click=reset_wizard, use_container_width=True)
+
+# ---------------------------------------------------------------------------
+# Progress stepper (shown on steps 1-3, not on welcome/done screens)
+# ---------------------------------------------------------------------------
+STEP_NAMES = ["Platform", "Page", "Block & Details"]
+
+def render_stepper(current):
+    html = '<div class="stepper">'
+    for i, name in enumerate(STEP_NAMES, start=1):
+        if i < current:
+            circle_class, content = "done", "✓"
+        elif i == current:
+            circle_class, content = "active", str(i)
+        else:
+            circle_class, content = "", str(i)
+        label_class = "active" if i == current else ""
+        html += f'<div class="step-circle {circle_class}">{content}</div>'
+        html += f'<div class="step-label {label_class}">{name}</div>'
+        if i < len(STEP_NAMES):
+            html += '<div class="step-line"></div>'
+    html += "</div>"
+    st.markdown(html, unsafe_allow_html=True)
+
+# ---------------------------------------------------------------------------
+# STEP 0 — Welcome / Intro
+# ---------------------------------------------------------------------------
+if st.session_state.step == 0:
+    st.title("🪑 Digital Merchandising — Block Update Tool")
+    st.markdown(
+        """
+        <div class="info-card">
+        Welcome! This tool replaces the old shared spreadsheet for updating what
+        products and images show in each block on the website and app.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("#### What you'll do")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown("**1. Choose where**")
+        st.caption("Pick Website or App, then the page — like Home or a Collection page.")
+    with c2:
+        st.markdown("**2. Choose the block**")
+        st.caption("Pick the exact section, like 'Hero Banner' or 'Best Sellers Carousel'.")
+    with c3:
+        st.markdown("**3. Fill it in**")
+        st.caption("Add the product SKU and image link, mark the status, submit.")
+
+    st.write("")
+    st.markdown(
+        """
+        <div class="info-card">
+        💡 <b>Tip:</b> Each block shows you the selection rule to follow (e.g. "Best Sellers" or
+        "New Arrivals") and the max number of products allowed — so you don't need to
+        remember the merchandising playbook, it's right there when you need it.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.write("")
+    if st.button("Start an update →", use_container_width=True, type="primary"):
+        go_to(1)
+        st.rerun()
 
 # ---------------------------------------------------------------------------
 # STEP 1 — Platform
 # ---------------------------------------------------------------------------
-if st.session_state.step == 1:
-    st.subheader("Step 1 of 3 — Where is this block?")
+elif st.session_state.step == 1:
+    render_stepper(1)
+    st.subheader("Where is this block?")
+    st.caption("Choose whether you're updating the website or the mobile app.")
+
     platforms = sorted(blocks_df["platform"].unique())
     cols = st.columns(len(platforms))
+    icons = {"Web": "🖥️", "App": "📱"}
     for i, p in enumerate(platforms):
         with cols[i]:
-            if st.button(f"📱 {p}" if p == "App" else f"🖥️ {p}", use_container_width=True, key=f"plat_{p}"):
+            st.markdown(f"### {icons.get(p, '')} {p}")
+            n_blocks = blocks_df.loc[blocks_df["platform"] == p, "block_id"].nunique()
+            st.caption(f"{n_blocks} blocks available")
+            if st.button(f"Select {p}", key=f"plat_{p}", use_container_width=True):
                 st.session_state.platform = p
-                st.session_state.step = 2
+                go_to(2)
                 st.rerun()
 
 # ---------------------------------------------------------------------------
 # STEP 2 — Page
 # ---------------------------------------------------------------------------
 elif st.session_state.step == 2:
-    st.subheader("Step 2 of 3 — Which page?")
-    st.caption(f"Platform: **{st.session_state.platform}**")
+    render_stepper(2)
+    st.markdown(
+        f'<div class="breadcrumb">Platform: <b>{st.session_state.platform}</b></div>',
+        unsafe_allow_html=True,
+    )
+    st.subheader("Which page?")
+    st.caption("Pick the page that has the block you want to update.")
 
     pages = sorted(
         blocks_df.loc[blocks_df["platform"] == st.session_state.platform, "page"].unique()
     )
     for p in pages:
-        if st.button(p, use_container_width=True, key=f"page_{p}"):
-            st.session_state.page = p
-            st.session_state.step = 3
-            st.rerun()
+        n_blocks = blocks_df[
+            (blocks_df["platform"] == st.session_state.platform) & (blocks_df["page"] == p)
+        ]["block_id"].nunique()
+        col_a, col_b = st.columns([5, 1])
+        with col_a:
+            st.markdown(f"**{p}**")
+            st.caption(f"{n_blocks} block{'s' if n_blocks != 1 else ''} on this page")
+        with col_b:
+            if st.button("Select", key=f"page_{p}", use_container_width=True):
+                st.session_state.page = p
+                go_to(3)
+                st.rerun()
+        st.divider()
 
-    st.button("← Back", on_click=lambda: st.session_state.update(step=1))
+    st.markdown('<div class="secondary-btn">', unsafe_allow_html=True)
+    st.button("← Back to platform", on_click=go_to, args=(1,))
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
 # STEP 3 — Block + form
 # ---------------------------------------------------------------------------
 elif st.session_state.step == 3:
-    st.subheader("Step 3 of 3 — Which block, and what's going in it?")
-    st.caption(f"Platform: **{st.session_state.platform}**  |  Page: **{st.session_state.page}**")
+    render_stepper(3)
+    st.markdown(
+        f'<div class="breadcrumb">Platform: <b>{st.session_state.platform}</b> '
+        f'&nbsp;→&nbsp; Page: <b>{st.session_state.page}</b></div>',
+        unsafe_allow_html=True,
+    )
+    st.subheader("Pick the block, then fill it in")
 
     subset = blocks_df[
         (blocks_df["platform"] == st.session_state.platform)
@@ -160,35 +315,44 @@ elif st.session_state.step == 3:
         for _, row in subset.iterrows()
     }
     block_id = st.selectbox(
-        "Block",
+        "Block on this page",
         options=list(block_labels.keys()),
         format_func=lambda bid: block_labels[bid],
+        help="Blocks are listed in the order they appear on the page, top to bottom.",
     )
     block_row = subset[subset["block_id"] == block_id].iloc[0]
 
-    with st.container():
-        st.markdown('<div class="block-card">', unsafe_allow_html=True)
-        st.markdown(f"**Block type:** {block_row['block_type']}")
-        st.markdown(f"**Selection rule to follow:** {block_row['rule']}")
-        max_skus = block_row["max_skus"]
-        if max_skus and str(max_skus) not in ("0", "—", "None", "nan"):
-            st.markdown(f"**Max products allowed in this block:** {max_skus}")
-        st.markdown("</div>", unsafe_allow_html=True)
+    max_skus = block_row["max_skus"]
+    max_skus_line = ""
+    if max_skus and str(max_skus) not in ("0", "—", "None", "nan"):
+        max_skus_line = f"<br>📦 <b>Max products allowed:</b> {max_skus}"
 
-    st.write("")
+    st.markdown(
+        f"""
+        <div class="block-card">
+        🧩 <b>Block type:</b> {block_row['block_type']}<br>
+        📐 <b>Selection rule to follow:</b> {block_row['rule']}{max_skus_line}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
+    st.markdown("##### Now fill in the details")
     with st.form("update_form", clear_on_submit=False):
         sku_handle = st.text_input(
             "Product SKU / Shopify Handle(s)",
             placeholder="e.g. confa-grey-sofa-set  (separate multiple with commas)",
+            help="The Shopify product handle — found in the product URL, after /products/",
         )
         image_url = st.text_input(
             "Image URL",
             placeholder="https://cdn.shopify.com/...",
+            help="Paste a direct link to the image — right-click the image and 'Copy image address'",
         )
         status = st.selectbox(
             "Status",
             ["🟢 Live & Current", "🟡 Needs Refresh", "🔴 Outdated / Broken", "⚪ Planned"],
+            help="See the sidebar for what each status means",
         )
         owner = st.selectbox(
             "Your name",
@@ -200,7 +364,7 @@ elif st.session_state.step == 3:
         )
         notes = st.text_area("Notes (optional)", placeholder="Any context for the CRO team")
 
-        submitted = st.form_submit_button("Submit update", use_container_width=True)
+        submitted = st.form_submit_button("✓ Submit update", use_container_width=True, type="primary")
 
         if submitted:
             if not sku_handle and not image_url:
@@ -221,13 +385,51 @@ elif st.session_state.step == 3:
                 }
                 try:
                     submit_row(row)
-                    st.success(f"Saved — {block_row['name']} updated in the tracker. ✅")
-                    st.balloons()
+                    st.session_state.last_submit = block_row["name"]
+                    go_to(4)
+                    st.rerun()
                 except Exception as e:
                     st.error(f"Couldn't save to the sheet: {e}")
 
+    st.write("")
     col1, col2 = st.columns(2)
     with col1:
-        st.button("← Back to pages", on_click=lambda: st.session_state.update(step=2))
+        st.markdown('<div class="secondary-btn">', unsafe_allow_html=True)
+        st.button("← Back to pages", on_click=go_to, args=(2,))
+        st.markdown("</div>", unsafe_allow_html=True)
     with col2:
+        st.markdown('<div class="secondary-btn">', unsafe_allow_html=True)
         st.button("Start over", on_click=reset_wizard)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+# ---------------------------------------------------------------------------
+# STEP 4 — Confirmation
+# ---------------------------------------------------------------------------
+elif st.session_state.step == 4:
+    st.title("✅ Saved")
+    st.success(f"**{st.session_state.last_submit}** was updated in the shared tracker.")
+    st.markdown(
+        """
+        <div class="info-card">
+        Your update is now visible to the CRO team in the shared Google Sheet.
+        No further action needed — they'll review and it'll go live on the next
+        publish cycle.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.write("")
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Update another block", use_container_width=True, type="primary"):
+            st.session_state.platform = None
+            st.session_state.page = None
+            st.session_state.block_id = None
+            go_to(1)
+            st.rerun()
+    with c2:
+        st.markdown('<div class="secondary-btn">', unsafe_allow_html=True)
+        if st.button("Done for now", use_container_width=True):
+            reset_wizard()
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
