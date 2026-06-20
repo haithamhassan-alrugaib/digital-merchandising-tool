@@ -29,7 +29,10 @@ st.set_page_config(
 # Note: .streamlit/config.toml fixes the base theme to light, so these
 # colors render the same regardless of the viewer's OS/browser dark mode.
 # ---------------------------------------------------------------------------
-GOLD = "#D4AF37"
+TERRACOTTA = "#C1623D"
+TERRACOTTA_DARK = "#9E4D2F"
+TEAL = "#1F6F6B"
+TEAL_DARK = "#15504D"
 CHARCOAL = "#121212"
 PARCHMENT = "#FDFBF7"
 LIGHT_GREY = "#F2EFE9"
@@ -61,35 +64,52 @@ st.markdown(
     }}
 
     /* Inputs */
-    .stTextInput input, .stTextArea textarea, .stSelectbox div[data-baseweb="select"] {{
+    .stTextInput input, .stTextArea textarea, .stSelectbox div[data-baseweb="select"],
+    .stDateInput input {{
         background-color: #FFFFFF !important;
         color: {CHARCOAL} !important;
         border: 1px solid {MID_GREY} !important;
     }}
 
+    /* Primary buttons — terracotta, hover to deep teal (never black) */
     .stButton>button {{
-        background-color: {GOLD}; color: #FFFFFF; border: none;
-        border-radius: 4px; padding: 0.6em 1.4em; font-weight: 600;
+        background-color: {TERRACOTTA}; color: #FFFFFF; border: none;
+        border-radius: 6px; padding: 0.6em 1.4em; font-weight: 600;
         transition: all 0.15s ease;
     }}
-    .stButton>button:hover {{ background-color: {CHARCOAL}; color: {GOLD}; }}
+    .stButton>button:hover {{
+        background-color: {TEAL}; color: #FFFFFF;
+    }}
+    .stButton>button:active {{
+        background-color: {TEAL_DARK} !important;
+    }}
     .stButton>button p {{ color: inherit !important; }}
+
+    /* Primary-type buttons get a slightly bolder treatment */
+    button[kind="primary"] {{
+        background-color: {TERRACOTTA} !important;
+    }}
+    button[kind="primary"]:hover {{
+        background-color: {TEAL} !important;
+    }}
 
     .secondary-btn button {{
         background-color: #FFFFFF !important; color: {CHARCOAL} !important;
         border: 1px solid {MID_GREY} !important;
     }}
     .secondary-btn button:hover {{
-        background-color: {LIGHT_GREY} !important; color: {CHARCOAL} !important;
+        background-color: {LIGHT_GREY} !important; color: {TEAL} !important;
+        border-color: {TEAL} !important;
     }}
 
     .block-card {{
-        background: #FFFFFF; border: 1px solid {MID_GREY}; border-left: 4px solid {GOLD};
-        border-radius: 4px; padding: 1.1em 1.3em; margin: 0.8em 0 1.2em 0; color: {CHARCOAL};
+        background: #FFFFFF; border: 1px solid {MID_GREY}; border-left: 4px solid {TEAL};
+        border-radius: 6px; padding: 1.1em 1.3em; margin: 0.8em 0 1.2em 0; color: {CHARCOAL};
     }}
     .info-card {{
-        background: {LIGHT_GREY}; border-radius: 4px; padding: 1em 1.2em;
+        background: {LIGHT_GREY}; border-radius: 6px; padding: 1em 1.2em;
         margin-bottom: 1em; font-size: 0.92em; color: {CHARCOAL};
+        border-left: 4px solid {TERRACOTTA};
     }}
     .breadcrumb {{ font-size: 0.85em; color: {TEXT_SECONDARY}; margin-bottom: 0.3em; }}
     .breadcrumb b {{ color: {CHARCOAL}; }}
@@ -107,8 +127,8 @@ st.markdown(
         font-weight: 700; font-size: 0.85em; color: #FFFFFF;
         background-color: {MID_GREY}; flex-shrink: 0;
     }}
-    .step-circle.active {{ background-color: {GOLD}; }}
-    .step-circle.done {{ background-color: {GREEN}; }}
+    .step-circle.active {{ background-color: {TERRACOTTA}; }}
+    .step-circle.done {{ background-color: {TEAL}; }}
     .step-label {{
         font-size: 0.78em; margin-left: 0.4em; margin-right: 0.9em; color: {TEXT_SECONDARY};
         white-space: nowrap;
@@ -153,8 +173,23 @@ def submit_row(row: dict):
     ws.append_row(
         [
             row["block_id"], row["platform"], row["page"], row["block_name"],
-            row["sku_handle"], row["image_url"], row["status"], row["owner"],
-            row["notes"], row["submitted_by"], row["timestamp"], "No",
+            row["sku_handle"], row["image_url"], row["update_type"],
+            row["start_date"], row["end_date"], row["supplier"],
+            row["notes"], row["submitted_by"], row["timestamp"], "No", "",
+        ],
+        value_input_option="USER_ENTERED",
+    )
+
+def submit_support_row(submitted_by: str, issue_text: str):
+    ws = get_worksheet()
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    ws.append_row(
+        [
+            "", "", "", "",          # block_id, platform, page, block_name — n/a
+            "", "", "", "", "", "",  # sku, image, update_type, start, end, supplier — n/a
+            "",                       # notes — n/a
+            submitted_by, timestamp, "No",
+            issue_text,               # Support Issue column
         ],
         value_input_option="USER_ENTERED",
     )
@@ -164,7 +199,8 @@ def submit_row(row: dict):
 # ---------------------------------------------------------------------------
 defaults = {
     "step": 0, "merch_name": "", "platform": None, "page": None,
-    "block_id": None, "last_submit": None,
+    "block_id": None, "last_submit": None, "show_support": False,
+    "support_submitted": False,
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -178,6 +214,10 @@ def reset_wizard(keep_name=True):
     for k, v in defaults.items():
         st.session_state[k] = v
     st.session_state.merch_name = name
+
+def sign_out():
+    """Full sign-out: clears the name and returns to the welcome/name page."""
+    reset_wizard(keep_name=False)
 
 # ---------------------------------------------------------------------------
 # Sidebar — always-visible instructions, present on every page
@@ -193,30 +233,40 @@ with st.sidebar:
 1. **Pick the platform** — Website or App
 2. **Pick the page** — Home, Collection, etc.
 3. **Pick the block** — see its wireframe, then pick it
-4. **Fill in the product + image** the block should show
+4. **Fill in the product, image, and dates** the block should show
 5. **Submit** — saved straight to the shared tracker
 
 No spreadsheet, no formatting to worry about — just pick and fill.
         """
     )
     st.divider()
-    st.markdown("### 🎨 Status meanings")
+    st.markdown("### ⏱️ Update type")
     st.markdown(
         """
-🟢 **Live & Current** — published, looks right
-🟡 **Needs Refresh** — live but getting stale
-🔴 **Outdated / Broken** — wrong product or broken link, fix ASAP
-⚪ **Planned** — approved, not live yet
+⚡ **Immediate** — goes live as soon as it's reviewed
+📅 **Schedule** — goes live on a specific start date, with an optional end date
         """
     )
     st.divider()
-    st.caption("Questions? Ping the CRO team on the shared channel.")
+    st.caption("Questions? Use the Contact Support button below.")
+
     if st.session_state.step > 0:
         st.button(
             "⟲ Start a new update",
             on_click=lambda: reset_wizard(keep_name=True),
             use_container_width=True,
         )
+
+    if st.session_state.merch_name:
+        st.markdown('<div class="secondary-btn">', unsafe_allow_html=True)
+        st.button("↪ Sign out", on_click=sign_out, use_container_width=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.write("")
+    if st.button("🛟 Contact support", use_container_width=True):
+        st.session_state.show_support = True
+        st.session_state.support_submitted = False
+        st.rerun()
 
 # ---------------------------------------------------------------------------
 # Progress stepper
@@ -239,6 +289,51 @@ def render_stepper(current):
             html += '<div class="step-line"></div>'
     html += "</div>"
     st.markdown(html, unsafe_allow_html=True)
+
+# ---------------------------------------------------------------------------
+# Contact support — modal dialog, available from the sidebar on every step
+# ---------------------------------------------------------------------------
+@st.dialog("Contact support")
+def support_dialog():
+    if st.session_state.support_submitted:
+        st.success("Thanks — your issue has been sent to the CRO team.")
+        if st.button("Close", use_container_width=True):
+            st.session_state.show_support = False
+            st.session_state.support_submitted = False
+            st.rerun()
+        return
+
+    st.caption(
+        "Describe the problem or question you have. This goes straight to the "
+        "CRO team's tracker — no need to message anyone separately."
+    )
+    issue_text = st.text_area(
+        "What's the issue?",
+        placeholder="e.g. The image URL field won't accept my Shopify CDN link...",
+        height=140,
+    )
+    submitted_by = st.session_state.merch_name or "Not signed in"
+    st.caption(f"Submitting as: {submitted_by}")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Submit", use_container_width=True, type="primary"):
+            if not issue_text.strip():
+                st.error("Add a description before submitting.")
+            else:
+                try:
+                    submit_support_row(submitted_by, issue_text.strip())
+                    st.session_state.support_submitted = True
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Couldn't send this: {e}")
+    with col2:
+        if st.button("Cancel", use_container_width=True):
+            st.session_state.show_support = False
+            st.rerun()
+
+if st.session_state.show_support:
+    support_dialog()
 
 # ---------------------------------------------------------------------------
 # STEP 0 — Welcome / Intro + name capture
@@ -402,6 +497,17 @@ elif st.session_state.step == 3:
     )
 
     st.markdown("##### Now fill in the details")
+
+    # Update type lives OUTSIDE the form so picking "Schedule" can reveal the
+    # End Date field immediately, without waiting for a form submit.
+    update_type = st.radio(
+        "Update type",
+        ["⚡ Immediate", "📅 Schedule"],
+        horizontal=True,
+        help="Immediate = goes live once reviewed. Schedule = goes live on a set date.",
+    )
+    is_scheduled = update_type == "📅 Schedule"
+
     with st.form("update_form", clear_on_submit=False):
         sku_handle = st.text_input(
             "Product SKU / Shopify Handle(s)",
@@ -413,15 +519,32 @@ elif st.session_state.step == 3:
             placeholder="https://cdn.shopify.com/...",
             help="Paste a direct link to the image — right-click the image and 'Copy image address'",
         )
-        status = st.selectbox(
-            "Status",
-            ["🟢 Live & Current", "🟡 Needs Refresh", "🔴 Outdated / Broken", "⚪ Planned"],
-            help="See the sidebar for what each status means",
-        )
-        owner = st.selectbox(
-            "Who's making this update",
-            ["Content Team", "Virtual Merchandising Team", "Other (note below)"],
-            help=f"Submitting as {st.session_state.merch_name}",
+
+        date_col1, date_col2 = st.columns(2)
+        with date_col1:
+            start_date_str = st.text_input(
+                "Start date",
+                placeholder="DD/MM",
+                help="The day this should go live, as DD/MM (e.g. 14/07)",
+            )
+        with date_col2:
+            if is_scheduled:
+                end_date_str = st.text_input(
+                    "End date",
+                    placeholder="DD/MM",
+                    help="The day this should come down, as DD/MM (e.g. 28/07)",
+                )
+            else:
+                end_date_str = ""
+                st.text_input(
+                    "End date",
+                    placeholder="Not needed for immediate updates",
+                    disabled=True,
+                )
+
+        supplier = st.text_input(
+            "Which supplier is requesting this update",
+            placeholder="e.g. Roots Furniture",
         )
         notes = st.text_area("Notes (optional)", placeholder="Any context for the CRO team")
 
@@ -430,6 +553,10 @@ elif st.session_state.step == 3:
         if submitted:
             if not sku_handle and not image_url:
                 st.error("Add at least a product SKU/handle or an image URL before submitting.")
+            elif not start_date_str.strip():
+                st.error("Add a start date before submitting.")
+            elif is_scheduled and not end_date_str.strip():
+                st.error("Schedule updates need an end date too.")
             else:
                 row = {
                     "block_id": block_id,
@@ -438,8 +565,10 @@ elif st.session_state.step == 3:
                     "block_name": block_row["name"],
                     "sku_handle": sku_handle,
                     "image_url": image_url,
-                    "status": status,
-                    "owner": owner,
+                    "update_type": update_type.split(" ", 1)[-1],  # "Immediate" or "Schedule"
+                    "start_date": start_date_str.strip(),
+                    "end_date": end_date_str.strip() if is_scheduled else "",
+                    "supplier": supplier,
                     "notes": notes,
                     "submitted_by": st.session_state.merch_name,
                     "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
