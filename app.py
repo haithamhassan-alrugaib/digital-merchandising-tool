@@ -72,35 +72,57 @@ st.markdown(
         border: 1px solid {MID_GREY} !important;
     }}
 
-    /* Primary buttons — terracotta, hover to deep teal (never black) */
+    /* ----------------------------------------------------------------- */
+    /* UNIFIED BUTTON SYSTEM                                              */
+    /* Every button — primary, secondary, icon, or plain — follows the    */
+    /* same hover rule: shift toward teal. Never black, never a different */
+    /* pattern per button type. Three visual variants share one behavior: */
+    /*   1. Default / primary -> terracotta bg, hovers to teal bg         */
+    /*   2. Secondary (.secondary-btn) -> white bg, hovers to teal border/text */
+    /*   3. Icon-only (small, e.g. the image remove "x") -> same as default */
+    /* ----------------------------------------------------------------- */
     .stButton>button {{
-        background-color: {TERRACOTTA}; color: #FFFFFF; border: none;
+        background-color: {TERRACOTTA}; color: #FFFFFF; border: 1px solid {TERRACOTTA};
         border-radius: 6px; padding: 0.6em 1.4em; font-weight: 600;
-        transition: all 0.15s ease;
+        transition: all 0.15s ease; min-height: 42px; width: 100%;
     }}
     .stButton>button:hover {{
-        background-color: {TEAL}; color: #FFFFFF;
+        background-color: {TEAL} !important; border-color: {TEAL} !important;
+        color: #FFFFFF !important;
     }}
     .stButton>button:active {{
-        background-color: {TEAL_DARK} !important;
+        background-color: {TEAL_DARK} !important; border-color: {TEAL_DARK} !important;
+    }}
+    .stButton>button:focus:not(:active) {{
+        background-color: {TERRACOTTA}; border-color: {TEAL};
+        box-shadow: 0 0 0 2px {TEAL}33;
     }}
     .stButton>button p {{ color: inherit !important; }}
 
-    /* Primary-type buttons get a slightly bolder treatment */
-    button[kind="primary"] {{
-        background-color: {TERRACOTTA} !important;
-    }}
-    button[kind="primary"]:hover {{
-        background-color: {TEAL} !important;
-    }}
-
+    /* Secondary (outline) buttons — same teal-on-hover rule, just inverted
+       base colors so it still reads as "secondary" at rest. */
     .secondary-btn button {{
         background-color: #FFFFFF !important; color: {CHARCOAL} !important;
         border: 1px solid {MID_GREY} !important;
     }}
     .secondary-btn button:hover {{
-        background-color: {LIGHT_GREY} !important; color: {TEAL} !important;
+        background-color: {TEAL} !important; color: #FFFFFF !important;
         border-color: {TEAL} !important;
+    }}
+    .secondary-btn button:active {{
+        background-color: {TEAL_DARK} !important; border-color: {TEAL_DARK} !important;
+    }}
+
+    /* Streamlit's own primary-kind marker — keep in lockstep with the
+       default rule above so type="primary" never drifts out of sync. */
+    button[kind="primary"] {{
+        background-color: {TERRACOTTA} !important; border-color: {TERRACOTTA} !important;
+    }}
+    button[kind="primary"]:hover {{
+        background-color: {TEAL} !important; border-color: {TEAL} !important;
+    }}
+    button[kind="primary"]:active {{
+        background-color: {TEAL_DARK} !important; border-color: {TEAL_DARK} !important;
     }}
 
     .block-card {{
@@ -150,9 +172,6 @@ st.markdown(
         }}
         .stepper {{ flex-wrap: wrap; row-gap: 0.5rem; }}
     }}
-
-    /* Keep all buttons in a row the same height regardless of label length */
-    .stButton>button {{ min-height: 42px; width: 100%; }}
 
     .warning-card {{
         background: #FBF1E6; border-left: 4px solid {TERRACOTTA};
